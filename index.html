@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>حرب الفرق | Keep</title>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#090909;color:#f5d58b;font-family:Arial,sans-serif;text-align:center}
+header{padding:17px;background:#111;border-bottom:1px solid #b38b42;color:#e9c46a;font-weight:bold;letter-spacing:1px}
+h1{font-size:30px;margin:25px 0 8px}
+.sub{color:#aaa;margin-bottom:25px}
+input,button{font:inherit;border-radius:10px;padding:13px;margin:6px}
+input{background:#171717;color:white;border:1px solid #9d7937;width:42%;min-width:130px}
+button{background:linear-gradient(135deg,#f2d18a,#a8792d);border:0;color:#17100a;font-weight:bold;cursor:pointer}
+button:disabled{opacity:.35}
+.teams{display:flex;gap:12px;justify-content:center;margin:20px 10px}
+.team{background:#171717;border:1px solid #9b793c;border-radius:15px;padding:17px;flex:1;max-width:240px}
+.score{font-size:35px;color:#fff;margin:10px}
+#turn{color:white;font-size:19px;margin:20px}
+.grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;max-width:600px;margin:20px auto;padding:12px}
+.card{height:105px;background:linear-gradient(145deg,#302512,#111);border:1px solid #d3a64e;border-radius:15px;color:#f5d58b;font-size:32px}
+.card span{display:block;font-size:13px;margin-top:8px}
+.card:disabled{opacity:.45}
+#result{font-size:24px;color:#fff;margin:20px}
+.panel{margin:20px auto;max-width:600px;padding:12px}
+.small{color:#aaa;font-size:13px}
+a{color:#f5d58b}
+</style>
+</head>
+<body>
+<header>✦ تصميم Keep ✦　 ID: 6258086　 ✦ تصميم الألعاب مجاني</header>
+
+<h1>⚔ حرب الفرق ⚔</h1>
+<div class="sub">المواجهة بدأت.. من سيصمد حتى النهاية؟</div>
+
+<div id="setup" class="panel">
+  <input id="team1" placeholder="اسم الفريق الأول">
+  <input id="team2" placeholder="اسم الفريق الثاني">
+  <br>
+  <button onclick="startGame()">إنشاء المواجهة</button>
+</div>
+
+<div class="teams">
+ <div class="team"><div id="name1">الفريق الأول</div><div class="score" id="score1">100</div></div>
+ <div class="team"><div id="name2">الفريق الثاني</div><div class="score" id="score2">100</div></div>
+</div>
+
+<div id="turn">بانتظار بداية المواجهة</div>
+<div id="grid" class="grid"></div>
+<div id="result"></div>
+
+<div class="panel">
+ <button id="share" onclick="shareViewer()" hidden>نسخ رابط المشاهدين</button>
+ <button id="restart" onclick="resetGame()" hidden>إعادة المباراة</button>
+ <div id="status" class="small"></div>
+</div>
+
+<script>
+const SUPABASE_URL="ضع_رابط_مشروعك_هنا";
+const SUPABASE_KEY="ضع_Publishable_Key_هنا";
+
+let db=null,channel=null,room=null,host=false;
+let state={started:false,names:["الفريق الأول","الفريق الثاني"],scores:[100,100],turn:0,values:[],used:[],winner:null};
+
+const $=id=>document.getElementById(id);
+
+function connect(){
+ if(SUPABASE_URL.includes("ضع_")||SUPABASE_KEY.includes("ضع_")){
+  $("status").textContent="أضف بيانات Supabase أولاً.";
+  return;
+ }
+ db=supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
+}
+
+function makeCards(){
+ return Array.from({length:12},()=>[5,10,15,20,25][Math.floor(Math.random()*5)]);
+}
+
+async function openRoom(){
+ if(!db)return;
+ channel=db.channel("keep-war-"+room,{config:{broadcast:{self:false}}});
+ channel.on("broadcast",{event:"state"},({payload})=>{
+   if(!host){state=payload;render()}
+ });
+ channel.on("broadcast",{event:"request"},()=>{
+   if(host)sendState();
+ });
+ channel.subscribe(async status=>{
+   if(status==="SUBSCRIBED"&&!host){
+     channel.send({type:"broadcast",event:"request",payload:{}});
+   }
+ });
+}
+
+function sendState(){
+ if(host&&channel)channel.send({type:"broadcast",event:"state",payload:state});
+}
+
+function render(){
+ $("name1").textContent=state.names[0];
+ $("name2").textContent=state.names[1];
+ $("score1").textContent=state.scores[0];
+ $("score2").textContent=state.scores[1];
+ $("turn").textContent=state.winner
+  ?"🏆 الفائز: "+state.winner
+  :"الدور على: "+state.names[state.turn];
+
+ $("grid").innerHTML="";
+ state.values.forEach((v,i)=>{
+  let b=document.createElement("button");
+  b.className="card";
+  b.disabled=!host||!state.started||state.used[i]||!!state.winner;
+  b.innerHTML=state.used[i]?"✦<span>تم الاختيار</span>":"❔<span>اختر الصورة</span>";
+  b.onclick=()=>choose(i);
+  $("grid").appendChild(b);
+ });
+ $("result").textContent=state.winner?"انتهت المواجهة!":"";
+ $("share").hidden=!host;
+ $("restart").hidden=!host;
+}
+
+function startGame(){
+ if(!$("team1").value.trim()||!$("team2").value.trim()){
+  alert("اكتب اسمي الفريقين");return;
+ }
+ host=true;
+ room=Math.random().toString(36).slice(2,8).toUpperCase();
+ state={started:true,names:[$("team1").value,$("team2").value],scores:[100,100],turn:0,values:makeCards(),used:Array(12).fill(false),winner:null};
+ $("setup").hidden=true;
+ connect();
+ openRoom();
+ render();
+}
+
+function choose(i){
+ if(!host||state.used[i]||state.winner)return;
+ let team=state.turn;
+ let points=state.values[i];
+ state.used[i]=true;
+ state.scores[team]=Math.max(0,state.scores[team]-points);
+ alert("انكشفت الصورة! خسر "+state.names[team]+" "+points+" نقاط");
+ if(state.scores[team]===0)state.winner=state.names[team===0?1:0];
+ else state.turn=1-team;
+ render();
+ sendState();
+}
+
+function shareViewer(){
+ let link=location.origin+location.pathname+"?view="+room;
+ navigator.clipboard.writeText(link).then(()=>alert("تم نسخ رابط المشاهدين"));
+}
+
+function resetGame(){
+ if(!confirm("إعادة المباراة؟"))return;
+ state={...state,started:true,scores:[100,100],turn:0,values:makeCards(),used:Array(12).fill(false),winner:null};
+ render();sendState();
+}
+
+async function viewerMode(code){
+ host=false;room=code;
+ $("setup").hidden=true;
+ $("turn").textContent="جاري الاتصال بالمواجهة...";
+ connect();
+ await openRoom();
+ $("status").textContent="وضع المشاهدة فقط";
+ render();
+}
+
+let params=new URLSearchParams(location.search);
+if(params.has("view"))viewerMode(params.get("view"));
+</script>
+</body>
+</html>
